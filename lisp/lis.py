@@ -1,4 +1,5 @@
-# Source: http://norvig.com/lispy.html
+## (c) Peter Norvig, 2010-18; See http://norvig.com/lispy.html
+
 # I have made some minor changes for Python version and better printing
 # but works the same as original
 
@@ -130,8 +131,8 @@ def eval(x: Exp, env=global_env) -> Exp:
         params, body = args
         return Procedure(params, body, env)
     else:                           # procedure call
-        proc = eval(x[0], env) 
-        args = [eval(arg, env) for arg in x[1:]]
+        proc = eval(op, env) 
+        args = [eval(arg, env) for arg in args]
         return proc(*args)
 
 def repl(prompt='lis.py> '):
