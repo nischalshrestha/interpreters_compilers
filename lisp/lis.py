@@ -3,6 +3,8 @@
 # I have made some minor changes for Python version and better printing
 # but works the same as original
 
+# bug: not return a list of map() in expand
+
 import math
 import operator as op
 
@@ -51,36 +53,34 @@ def standard_env() -> Env:
     """An environment with some Scheme standard procedures"""
     env = Env()
     env.update(vars(math))
-    env.update(vars(cmath))
-    self.update({
-     '+':op.add, '-':op.sub, '*':op.mul, '/':op.div, 'not':op.not_, 
-     '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq, 
-     'equal?':op.eq, 
-     'eq?':op.is_, 
-     'length':len, 
-     'cons':lambda x,y:[x]+list(y), 
-     'car':lambda x:x[0], 
-     'cdr':lambda x:x[1:], 'append':op.add,  
-     'list':lambda *x:list(x), 
-     'list?': lambda x:isa(x,list),
-     'null?':lambda x:x==[], 
-     'symbol?':lambda x: isa(x, Symbol),
-     'boolean?':lambda x: isa(x, bool), 
-     'pair?':is_pair, 
-     'port?': lambda x:isa(x,file), 
-     'apply':lambda proc,l: proc(*l), 
-     'eval':lambda x: eval(expand(x)), 
-     'load':lambda fn: load(fn), 
-     'call/cc':callcc,
-     'open-input-file':open,
-     'close-input-port':lambda p: p.file.close(), 
-     'open-output-file':lambda f:open(f,'w'), 
-     'close-output-port':lambda p: p.close(),
-     'eof-object?':lambda x:x is eof_object, 
-     'read-char':readchar,
-     'read':read, 
-     'write':lambda x,port=sys.stdout:port.write(to_string(x)),
-     'display':lambda x,port=sys.stdout:port.write(x if isa(x,str) else to_string(x))})
+    env.update({
+        # TODO make operators like + for apply
+        '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv,
+        '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq,
+        'abs':      abs,
+        'append':   op.add,
+        'apply':    lambda proc, args: proc(*args),
+        'begin':    lambda *x: x[-1], # we unpack bc we're given variadic args, not a list
+        'car':      lambda x: x[0],
+        'cdr':      lambda x: x[1:],
+        'cons':     lambda x, y: [x] + y,
+        'eq?':      op.is_, 
+        'expt':     pow,
+        'equal?':   op.eq,
+        'length':   len,
+        'list':     lambda *x: List(x),
+        'list?':    lambda x: isa(x, List),
+        'map':      lambda x, y: list(map(x, y)),
+        'max':      max,
+        'min':      min,
+        'not':      op.not_,
+        'null?':    lambda x: x == [],
+        'number?':  lambda x: isa(x, Number),
+        'print':    lambda x: schemestr(x),
+        'procedure?': callable,
+        'round':    round,
+        'symbol?':  lambda x: isa(x, Symbol),
+    })
     return env
         
 def schemestr(exp) -> str:
@@ -148,13 +148,13 @@ def repl(prompt='lis.py> '):
         if val is not None:
             print(schemestr(val))
 
-def to_string(x):
+def lispstr(x):
     "Convert a Python object back into a Lisp-readable string."
     if x is True: return "#t"
     elif x is False: return "#f"
     elif isa(x, Symbol): return x
     elif isa(x, str): return '"%s"' % x.encode('string_escape').replace('"',r'\"')
-    elif isa(x, list): return '('+' '.join(map(to_string, x))+')'
+    elif isa(x, list): return '('+' '.join(map(lispstr, x))+')'
     elif isa(x, complex): return str(x).replace('j', 'i')
     else: return str(x)
 

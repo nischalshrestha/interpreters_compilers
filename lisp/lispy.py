@@ -76,6 +76,9 @@ def read(inport):
         elif token in quotes: return [quotes[token], read(inport)]
         elif token is eof_object: raise SyntaxError('unexpected EOF in list')
         else: return atom(token)
+     # body of read:
+    token1 = inport.next_token()
+    return eof_object if token1 is eof_object else read_ahead(token1)
 
 quotes = {"'":_quote, "`":_quasiquote, ",":_unquote, ",@":_unquotesplicing}
 
@@ -83,38 +86,42 @@ def atom(token):
     """Numbers become numbers; #t and #f booleans; "..." strings; otherwise, Symbol."""
     if token == '#t': return True
     elif token == '#f': return False
-    elif token[0] == '"': return token[1:-1].decode('string_escape')
+    # removed redundant decode => "AttributeError 'str' object has no attribute 'decode'"
+    elif token[0] == '"': return token[1:-1]
     try: return int(token)
     except ValueError:
         try: return float(token)
         except ValueError:
             try: return complex(token.replace('i','j',1))
             except ValueError:
-                return Symbol(token)
+                return Sym(token)
 
-def to_string(x):
+def lispstr(x):
     "Convert a Python object back into a Lisp-readable string."
     if x is True: return "#t"
     elif x is False: return "#f"
     elif isa(x, Symbol): return x
-    elif isa(x, str): return '"%s"' % x.encode('string_escape').replace('"',r'\"')
-    elif isa(x, list): return '('+' '.join(map(to_string, x))+')'
+    elif isa(x, str): return '"%s"' % x.encode('unicode_escape').replace('"',r'\"')
+    elif isa(x, list): return '('+' '.join(map(lispstr, x))+')'
     elif isa(x, complex): return str(x).replace('j', 'i')
     else: return str(x)
 
 def load(filename):
     """Eval every expression from a file."""
-    repl(None, InPort(open(filename)), None)
+    repl(None, InPort(open(filename)))
 
-def repl(prompt='lispy> ', inport=InPort(sys.stdin), out=sys.stdout):
+def repl(prompt=None, inport=InPort(sys.stdin), out=sys.stdout):
     """A read-eval-print-loop"""
+    if prompt: sys.stderr.write("Lispy version 2.0\n")
     while True:
         try:
-            if prompt: sys.stderr.write(prompt)
+            # TODO figure out a way to print 'lisp> ' without encoding issue
+            if prompt: 
+                sys.stderr.write(prompt)
             x = parse(inport)
             if x is eof_object: return
             val = eval(x)
-            if val is not None and out: print(to_string(val), file=out)
+            if val is not None and out: print(lispstr(val), file=out)
         except Exception as e:
             print(f"{type(e).__name__}: {e}")
 
@@ -128,7 +135,7 @@ class Env(dict):
             self.update({params: list(args)})    
         else:
             if len(args) != len(params):
-                raise TypeError(f"expected {to_string(params)}, given {to_string(args)}")
+                raise TypeError(f"expected {lispstr(params)}, given {lispstr(args)}")
             self.update(zip(params, args))
     
     def find(self, var):
@@ -143,13 +150,13 @@ def cons(x, y): return [x]+y
 
 # TODO store the continuation away and call it multiple times, each time 
 # returning to the same place. (like true Scheme call/cc)
-def call_cc(proc):
+def callcc(proc):
     """Call proc with current continuation; escape only"""
     ball = RuntimeWarning("Sorry, can't continue this continuation any longer.")
     def throw(retval): ball.retval = retval; raise ball
     try:
         return proc(throw)
-    except RuntimeError as w:
+    except RuntimeWarning as w:
         if w is ball: return ball.retval
         else: raise w
 
@@ -157,34 +164,41 @@ def add_globals(env) -> Env:
     """An environment with some Scheme standard procedures"""
     import math, cmath, operator as op
     env.update(vars(math))
+    env.update(vars(cmath))
+    # made + be variadic
+    # TODO: would be fun to allow variadic args for lambdas
     env.update({
-        '+':op.add, '-':op.sub, '*':op.mul, '/':op.truediv,
-        '>':op.gt, '<':op.lt, '>=':op.ge, '<=':op.le, '=':op.eq,
-        'abs':      abs,
-        'append':   op.add,
-        'apply':    lambda proc, args: proc(*args),
-        'begin':    lambda *x: x[-1], # we unpack bc we're given variadic args, not a list
-        'car':      lambda x: x[0],
-        'cdr':      lambda x: x[1:],
-        'cons':     cons,
-        'pair?':    is_pair,
-        'eq?':      op.is_, 
-        'expt':     pow,
-        'equal?':   op.eq,
-        'length':   len,
-        'list':     lambda *x: List(x),
-        'list?':    lambda x: isa(x, List),
-        'map':      lambda x, y: list(map(x, y)),
-        'max':      max,
-        'min':      min,
-        'not':      op.not_,
-        'null?':    lambda x: x == [],
-        'number?':  lambda x: isa(x, Number),
-        'print':    lambda x: schemestr(x),
-        'procedure?': callable,
-        'round':    round,
-        'symbol?':  lambda x: isa(x, Symbol),
-    })
+     '+': lambda *x: sum(x), '-': op.sub, '*': op.mul, '/': op.truediv, 'not': op.not_, 
+     '>': op.gt, '<': op.lt, '>=': op.ge, '<=': op.le, '=': op.eq, 
+     'abs': abs, # bug: this is built-in and wasn't included 
+     'equal?': op.eq, 
+     'eq?': op.is_, 
+     'length': len, 
+     'cons': lambda x,y:[x]+list(y), 
+     'car': lambda x:x[0], 
+     'cdr': lambda x:x[1:], 
+     'append': op.add,  
+     'list': lambda *x:list(x), 
+     'list?': lambda x:isa(x,list),
+     'null?': lambda x:x==[], 
+     'symbol?': lambda x: isa(x, Symbol),
+     'boolean?': lambda x: isa(x, bool), 
+     'pair?': is_pair, 
+     'port?': lambda x:isa(x,file), 
+     'map': lambda x, y: list(map(x, y)),
+     'apply': lambda proc, *l: proc(*l), # made apply take in variadic args
+     'eval': lambda x: eval(expand(x)), 
+     'load': lambda fn: load(fn), 
+     'call/cc': callcc,
+     'open-input-file': open,
+     'close-input-port': lambda p: p.file.close(), 
+     'open-output-file': lambda f:open(f,'w'), 
+     'close-output-port': lambda p: p.close(),
+     'eof-object?': lambda x:x is eof_object, 
+     'read-char': readchar,
+     'read': read, 
+     'write': lambda x,port=sys.stdout:port.write(lispstr(x)),
+     'display': lambda x,port=sys.stdout:port.write(x if isa(x,str) else lispstr(x))})
     return env
 
 isa = isinstance
@@ -192,69 +206,66 @@ global_env = add_globals(Env())
 
 ################ eval (tail recursive)
 
-# TODO make tail recursive
 def eval(x, env=global_env):
     """Evaluate an expression in an environment"""
-    if isa(x, Symbol):              # variable reference 
-        return env.find(x)[x]
-    elif not isa(x, List):          # constant number
-        return x
-    op = x[0]
-    if op == _quote:               # (quote exp)
-        _, exp = x
-        return exp
-    elif op == _if:                # (if test conseq alt)
-        # this is called 'destructuring'
-        _, test, conseq, alt = x
-        x = conseq if eval(test, env) else alt
-    elif op == _define:            # (define var exp)
-        _, var, exp = x
-        env[var] = eval(exp, env)
-        return None
-    elif op == _set:               # (set! var exp)
-        _, var, exp = x
-        env.find(var)[var] = eval(exp, env)
-        return None
-    elif op == _lambda:            # (lambda (var*) exp)
-        _, params, exp = x
-        return Procedure(params, exp, env)
-    elif op == _begin:             # (begin exp+)
-        _, params, body = x
-        for exp in x[1:-1]:
-            eval(exp, env)
-        x = x[-1]
-    else:                           # (proc exp*)
-        exps = [eval(exp, env) for exp in x]
-        proc = exps.pop(0) 
-        if isa(proc, Procedure):
-            x = proc.exp
-            env = Env(proc.params, exps, proc.env)
-        else:
-            return proc(*exps)
+    while True:
+        if isa(x, Symbol):              # variable reference 
+            return env.find(x)[x]
+        elif not isa(x, list):          # constant number
+            return x
+        if x[0] == _quote:               # (quote exp)
+            _, exp = x
+            return exp
+        elif x[0] == _if:                # (if test conseq alt)
+            # this is called 'destructuring'
+            _, test, conseq, alt = x
+            x = conseq if eval(test, env) else alt
+        elif x[0] == _set:               # (set! var exp)
+            _, var, exp = x
+            env.find(var)[var] = eval(exp, env)
+            return None
+        elif x[0] == _define:            # (define var exp)
+            _, var, exp = x
+            env[var] = eval(exp, env)
+            return None
+        elif x[0] == _lambda:            # (lambda (var*) exp)
+            _, params, exp = x
+            return Procedure(params, exp, env)
+        elif x[0] == _begin:             # (begin exp+)
+            for exp in x[1:-1]:
+                eval(exp, env)
+            x = x[-1]
+        else:                           # (proc exp*)
+            exps = [eval(exp, env) for exp in x]
+            proc = exps.pop(0) 
+            if isa(proc, Procedure):
+                x = proc.exp
+                env = Env(proc.params, exps, proc.env)
+            else:
+                return proc(*exps)
 
 ################ expand (handle macros)
 
 def expand(x, toplevel=False):
     """Walk tree of x and make optimizations/fixes, and signal SyntaxError"""
     require(x, x != [])                 # () => Error
-    op = x[0]
     if not isa(x, list):                # constant
         return x
-    elif op is _quote:                  # (quote exp)
+    elif x[0] is _quote:                  # (quote exp)
         require(x, len(x) == 2)
         return x
-    elif op is _if:
+    elif x[0] is _if:
         if len(x) == 3: x = x + [None]  # (if t c) => (if t c None) 
         require(x, len(x) == 4)
-        return map(expand, x)
-    elif op is _set:                    # (set! non-var exp) => Error
+        return list(map(expand, x))
+    elif x[0] is _set:                    # (set! non-var exp) => Error
         require(x, len(x) == 3)
         var = x[1]
         require(x, isa(var, Symbol), "can set! only a symbol")
         return [_set, var, expand(x[2])]
-    elif op is _define or op is _definemacro:
+    elif x[0] is _define or x[0] is _definemacro:
         require(x, len(x) >= 3)
-        _def, v, body = op, x[1], x[2:]
+        _def, v, body = x[0], x[1], x[2:]
         if isa(v, list) and v:          # (define (f args) body)
             f, args = v[0], v[1:]       # => (define f (lambda (args) body))
             return expand([_def, f, [_lambda, args] + body])
@@ -265,31 +276,31 @@ def expand(x, toplevel=False):
             if _def is _definemacro:
                 require(x, toplevel, "define-macro only allowed at top level")
                 proc = eval(exp)
-                require(x, callable(proc))
+                require(x, callable(proc), "macro must be a procedure")
                 macro_table[v] = proc   # (define-macro v proc)
                 return None             # => None; add v:proc to macro_table
             return [_define, v, exp]
-    elif op is _begin:
+    elif x[0] is _begin:
         if len(x) == 1: return None     # (begin) => None
         else: return [expand(xi, toplevel) for xi in x]
-    elif op is _lambda:                 # (lambda (x) e1 e2) 
+    elif x[0] is _lambda:               # (lambda (x) e1 e2) 
         require(x, len(x) >= 3)         #  => (lambda (x) (begin e1 e2))
         vars, body = x[1], x[2:]
         require(x, (isa(vars, list) and all(isa(v, Symbol) for v in vars))
                 or isa(vars, Symbol), "illegal lambda argument list")
         exp = body[0] if len(body) == 1 else [_begin] + body
         return [_lambda, vars, expand(exp)]
-    elif op is _quasiquote:
+    elif x[0] is _quasiquote:
         require(x, len(x) == 2)
         return expand_quasiquote(x[1])
     elif isa(x[0], Symbol) and x[0] in macro_table:
         return expand(macro_table[x[0]](*x[1:]), toplevel) # (m arg...) 
     else:                                #        => macroexpand if m isa macro
-        return map(expand, x)            # (f arg...) => expand each
+        return list(map(expand, x))            # (f arg...) => expand each
 
 def require(x, predicate, msg="wrong length"):
     """Signal a syntax error if predicate is false."""
-    if not predicate: raise SyntaxError(to_string(x)+': '+msg)
+    if not predicate: raise SyntaxError(lispstr(x)+': '+msg)
 
 _append, _cons, _let = map(Sym, "append cons let".split())
 
@@ -302,7 +313,7 @@ def expand_quasiquote(x):
         require(x, len(x) == 2)
         return x[1]
     elif is_pair(x[0]) and x[0][0] is _unquotesplicing:
-        require(x[0], len(x[0])==2)
+        require(x[0], len(x[0]) == 2)
         return [_append, x[0][1], expand_quasiquote(x[1:])]
     else:
         return [_cons, expand_quasiquote(x[0]), expand_quasiquote(x[1:])]
@@ -315,10 +326,22 @@ def let(*args):
     blist = [isa(b, list) and len(b) == 2 and isa(b[0], Symbol) for b in bindings]
     require(x, all(blist), "illegal binding list")
     vars, vals = zip(*bindings)
-    return [[_lambda, list(vars)] + map(expand, body)] + map(expand, vals)
+    # bug: did not list() map
+    return [[_lambda, list(vars)] + list(map(expand, body))] + list(map(expand, vals))
 
 macro_table = {_let:let} # More macros can go here
 
-# TODO add a way to read / compile scm files as well
-# if __name__ == '__main__':
-    # repl()
+# adds the and macro to the macro_table
+eval(parse("""(begin
+(define-macro and (lambda args 
+   (if (null? args) #t
+       (if (= (length args) 1) (car args)
+           `(if ,(car args) (and ,@(cdr args)) #f)))))
+;; More macros can also go here
+)"""))
+
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        load(sys.argv[1])
+    else:
+        repl("lispy> ")

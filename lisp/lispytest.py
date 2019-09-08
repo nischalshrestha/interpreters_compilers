@@ -1,6 +1,5 @@
 
 ################ Tests for lis.py and lispy.py
-# Source: http://norvig.com/lispy2.html
 
 lis_tests = [
     ("(quote (testing 1 (2.0) -3.14e159))", ['testing', 1, [2.0], -3.14e159]),
@@ -9,7 +8,6 @@ lis_tests = [
     ("(if (> 6 5) (+ 1 1) (+ 2 2))", 2),
     ("(if (< 6 5) (+ 1 1) (+ 2 2))", 4),
     ("(define x 3)", None), ("x", 3), ("(+ x x)", 6),
-    ("(begin (define x 1) (set! x (+ x 1)) (+ x 1))", 3),
     ("((lambda (x) (+ x x)) 5)", 10),
     ("(define twice (lambda (x) (* 2 x)))", None), ("(twice 5)", 10),
     ("(define compose (lambda (f g) (lambda (x) (f (g x)))))", None),
@@ -39,25 +37,27 @@ lis_tests = [
     ]
 
 lispy_tests = [
-    ("()", SyntaxError), ("(set! x)", SyntaxError), 
+    ("()", SyntaxError), 
+    ("(set! x)", SyntaxError), 
     ("(define 3 4)", SyntaxError),
     ("(quote 1 2)", SyntaxError), ("(if 1 2 3 4)", SyntaxError), 
     ("(lambda 3 3)", SyntaxError), ("(lambda (x))", SyntaxError),
     ("""(if (= 1 2) (define-macro a 'a) 
-     (define-macro a 'b))""", SyntaxError),
+    #  (define-macro a 'b))""", SyntaxError),
     ("(define (twice x) (* 2 x))", None), ("(twice 2)", 4),
     ("(twice 2 2)", TypeError),
     ("(define lyst (lambda items items))", None),
     ("(lyst 1 2 3 (+ 2 2))", [1,2,3,4]),
     ("(if 1 2)", 2),
     ("(if (= 3 4) 2)", None),
+    ("(begin (define x 1) (set! x (+ x 1)) (+ x 1))", 3),
     ("(define ((account bal) amt) (set! bal (+ bal amt)) bal)", None),
     ("(define a1 (account 100))", None),
     ("(a1 0)", 100), ("(a1 10)", 110), ("(a1 10)", 120),
     ("""(define (newton guess function derivative epsilon)
     (define guess2 (- guess (/ (function guess) (derivative guess))))
     (if (< (abs (- guess guess2)) epsilon) guess2
-        (newton guess2 function derivative epsilon)))""", None),
+        (newton guess2 function derivative epsilon)))""", None), # fails
     ("""(define (square-root a)
     (newton 1 (lambda (x) (- (* x x) a)) (lambda (x) (* 2 x)) 1e-8))""", None),
     ("(> (square-root 200.) 14.14213)", True),
@@ -104,11 +104,11 @@ def test(tests, name=''):
     for (x, expected) in tests:
         try:
             result = eval(parse(x))
-            print(x, '=>', to_string(result))
+            print(x, '=>', lispstr(result))
             ok = (result == expected)
         except Exception as e:
             print(x, '=raises=>', type(e).__name__, e)
-            ok = issubclass(expected, Exception) and isinstance(e, expected)
+            ok = isinstance(expected, type) and issubclass(expected, Exception) and isinstance(e, expected)
         if not ok:
             fails += 1
             print('FAIL!!!  Expected', expected)
@@ -117,6 +117,6 @@ def test(tests, name=''):
 if __name__ == '__main__':
     from lis import *
     test(lis_tests, 'lis.py')
-    # from lispy import *
-    # test(lis_tests+lispy_tests, 'lispy.py')
-
+    from lispy import *
+    test(lis_tests+lispy_tests, 'lispy.py')
+    

@@ -22,13 +22,15 @@
             1 
             (+ (fib (- n 1)) (fib (- n 2))))))
 
-; (define range (lambda (a b) (if (= a b) (quote ()) (cons a (range (+ a 1) b)))))
-; (define range (lambda (a b) (if (= a b) ('()) (cons a (range (+ a 1) b)))))
 (define range 
     (lambda (a b) 
         (if (= a b) 
-            ('()) 
+            '()
             (cons a (range (+ a 1) b)))))
 
-(map (lambda (x) (* x 2)) (quote (1 2 3 4 5 6)))
-
+(map (lambda (x) (* x 2)) '(1 2 3 4 5 6))
+; (apply + 1 5 2 2 1 1)
+; you could either just call the proc
+(range 2 10)
+; or use apply
+(apply range 2 10)
